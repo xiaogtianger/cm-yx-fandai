@@ -1,0 +1,131 @@
+name: 自动拉取反代IP(纯净版)
+
+on:
+  # 每天北京时间早上 8:00 自动运行 (UTC 0:00)
+  schedule:
+    - cron: '0 0 * * *'
+  # 允许在 GitHub 页面上手动触发运行
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. 检出仓库代码（为了后续能把生成的 txt 推送回来）
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+
+    # 2. 安装 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 3. 在线动态生成并运行 Python 脚本
+    - name: Create and Run Script
+      run: |
+        cat << 'EOF' > temp_script.py
+        import os
+        import json
+        import urllib.request
+        import urllib.error
+
+        def generate_vless_from_api():
+            TARGET_COUNTRY = None
+            TARGET_ASNS = {906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453}
+            TARGET_PORT = None
+
+            API_URL = "https://zip.cm.edu.kg/all.json"
+            
+            print(f"建立网络连接: 开始抓取目标接口数据 {API_URL}")
+            try:
+                request_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                req = urllib.request.Request(API_URL, headers=request_headers)
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    json_response = response.read().decode('utf8')
+                    raw_data = json.loads(json_response)
+            except Exception as e:
+                print(f"致命阻断: 网络通信故障 详情: {e}")
+                return
+
+            node_data_list = []
+            if isinstance(raw_data, list):
+                node_data_list = raw_data
+            elif isinstance(raw_data, dict):
+                for key, value in raw_data.items():
+                    if isinstance(value, list): node_data_list.extend(value)
+                    elif isinstance(value, dict): node_data_list.append(value)
+
+            if not node_data_list:
+                print("致命阻断: 数据源为空。")
+                return
+                
+            seen_ips = set()
+            final_links = []
+
+            for item in node_data_list:
+                if not isinstance(item, dict): continue
+                meta_data = item.get("meta", {})
+                port = item.get("_port") or meta_data.get("_port")
+                if port is None:
+                    port_list = item.get("port")
+                    if isinstance(port_list, list) and len(port_list) > 0: port = port_list[0]
+                        
+                country = meta_data.get("country")
+                asn = meta_data.get("asn")
+
+                if port is None: continue
+                if TARGET_COUNTRY and country != TARGET_COUNTRY: continue
+                if TARGET_ASNS and asn not in TARGET_ASNS: continue
+                if TARGET_PORT and int(port) != TARGET_PORT: continue
+                
+                v4_ip = item.get("ip")
+                v6_ip = meta_data.get("clientIp")
+                
+                node_ips = []
+                if v4_ip: node_ips.append(v4_ip)
+                if v6_ip: node_ips.append(v6_ip)
+                    
+                for current_ip in node_ips:
+                    if current_ip in seen_ips: continue
+                    seen_ips.add(current_ip)
+                    
+                    if ":" in current_ip:
+                        formatted_ip = f"[{current_ip}]"
+                    else:
+                        formatted_ip = current_ip
+                        
+                    full_url = f"{formatted_ip}:{port}"
+                    final_links.append(full_url)
+
+            total_links = len(final_links)
+            print(f"多维匹配完成: 精确筛出并去重 {total_links} 个独立优选IP。")
+
+            if total_links == 0: return
+
+            chunk_size = 50
+            for i in range(0, total_links, chunk_size):
+                chunk = final_links[i : i + chunk_size]
+                file_index = (i // chunk_size) + 1
+                output_filename = f"vless_api_part{file_index}.txt"
+                with open(output_filename, 'w', encoding='utf8') as out_f:
+                    for link in chunk: out_f.write(link + "\n")
+                print(f"数据固化: {output_filename} 封装完毕")
+
+        if __name__ == "__main__":
+            generate_vless_from_api()
+        EOF
+        
+        # 运行刚刚生成的临时脚本
+        python temp_script.py
+
+    # 4. 把生成的 txt 文件自动提交并推送到仓库
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        # 仅将生成的 txt 文件加入暂存区，临时 py 文件会被自动忽略
+        git add vless_api_part*.txt
+        git diff --quiet && git diff --staged --quiet || git commit -m "自动更新优选IP列表"
+        git push
