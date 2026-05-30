@@ -1,4 +1,4 @@
-name: 自动拉取反代IP(带国家备注版)
+name: 自动拉取反代IP(防闪退合并版)
 
 on:
   # 每天北京时间早上 8:00 自动运行 (UTC 0:00)
@@ -37,7 +37,8 @@ jobs:
 
         def generate_vless_from_api():
             TARGET_COUNTRY = None
-            TARGET_ASNS = {36002，8143，906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453}
+            # 已经为你新增了 36002 (GoMami) 和 8143 (Neburst)
+            TARGET_ASNS = {906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453, 36002, 8143}
             TARGET_PORT = None
 
             API_URL = "https://zip.cm.edu.kg/all.json"
@@ -67,8 +68,6 @@ jobs:
                 
             seen_ips = set()
             final_links = []
-            
-            # 用于分国家或总序号计数
             counter = 0
 
             for item in node_data_list:
@@ -80,12 +79,19 @@ jobs:
                     if isinstance(port_list, list) and len(port_list) > 0: port = port_list[0]
                         
                 country = meta_data.get("country", "Unknown")
-                asn = meta_data.get("asn")
+                asn = meta_data.get("asn", "Unknown")
                 
-                # 从原始数据尝试提取组织/品牌名称，如果拿不到就用 ASN 代替
-                org_name = meta_data.get("org", "").split()[0] if meta_data.get("org") else f"AS{asn}"
-                # 清洗一下组织名字，去掉特殊字符
+                # 【防闪退增强】提取品牌/组织名称，做多重降级备用保护
+                raw_org = meta_data.get("org") or meta_data.get("isp") or ""
+                if raw_org:
+                    org_name = str(raw_org).split()[0]
+                else:
+                    org_name = f"AS{asn}"
+                
+                # 严格清洗名字，确保只留下字母和数字，防止作为节点名时在某些客户端闪退
                 org_name = "".join(e for e in org_name if e.isalnum())
+                if not org_name: 
+                    org_name = f"AS{asn}"
 
                 if port is None: continue
                 if TARGET_COUNTRY and country != TARGET_COUNTRY: continue
@@ -108,11 +114,10 @@ jobs:
                     else:
                         formatted_ip = current_ip
                     
-                    # 序号递增并格式化为两位数（如 01, 02）
                     counter += 1
                     idx_str = f"{counter:02d}"
                     
-                    # 【核心修改点】拼接出：IP:端口#CM_品牌_国家_序号
+                    # 拼接带有容错保护的备注信息
                     full_url = f"{formatted_ip}:{port}#CM_{org_name}_{country}_{idx_str}"
                     final_links.append(full_url)
 
@@ -140,5 +145,5 @@ jobs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add vless_api_all.txt
-        git diff --quiet && git diff --staged --quiet || git commit -m "自动更新合并版优选IP列表(带国家备注)"
+        git diff --quiet && git diff --staged --quiet || git commit -m "自动更新合并版优选IP列表(防闪退版)"
         git push
