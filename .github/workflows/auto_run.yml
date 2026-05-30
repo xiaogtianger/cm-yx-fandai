@@ -31,7 +31,7 @@ jobs:
 
         def generate_vless_from_api():
             TARGET_COUNTRY = None
-            TARGET_ASNS = {906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453, 36002, 8143, 16509, 8075, 14061, 64050, 9312, 14223, 24940}
+            TARGET_ASNS = {906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453, 36002, 8143}
             TARGET_PORT = None
 
             API_URL = "https://zip.cm.edu.kg/all.json"
