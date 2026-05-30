@@ -1,4 +1,4 @@
-name: 自动拉取反代IP(合并版)
+name: 自动拉取反代IP(合并终极版)
 
 on:
   # 每天北京时间早上 8:00 自动运行 (UTC 0:00)
@@ -10,19 +10,15 @@ on:
 jobs:
   run-script:
     runs-on: ubuntu-latest
-    
-    # 解决 Node.js 20 弃用警告
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-    # 1. 检出仓库代码
+    # 1. 检出仓库代码（升级到原生支持 Node 24 的子版本）
     - name: Checkout repository code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4.2.2
 
-    # 2. 安装 Python 环境
+    # 2. 安装 Python 环境（升级到原生支持 Node 24 的子版本）
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v5.4.0
       with:
         python-version: '3.10'
 
@@ -108,7 +104,24 @@ jobs:
 
             if total_links == 0: return
 
-            # 【修改点】不再切片分块，全部数据一次性写入单文件
             output_filename = "vless_api_all.txt"
             with open(output_filename, 'w', encoding='utf8') as out_f:
-                for
+                for link in final_links: 
+                    out_f.write(link + "\n")
+            print(f"数据固化: 所有数据已成功合并写入 {output_filename}")
+
+        if __name__ == "__main__":
+            generate_vless_from_api()
+        EOF
+        
+        # 运行临时脚本
+        python temp_script.py
+
+    # 4. 把合并后的单个 txt 文件自动提交并推送到仓库
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add vless_api_all.txt
+        git diff --quiet && git diff --staged --quiet || git commit -m "自动更新合并版优选IP列表"
+        git push
