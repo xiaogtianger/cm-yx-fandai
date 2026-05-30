@@ -1,4 +1,4 @@
-name: 自动拉取反代IP(强行更新版)
+name: 自动拉取反代IP(中文黑话分类版)
 
 on:
   schedule:
@@ -31,8 +31,26 @@ jobs:
 
         def generate_vless_from_api():
             TARGET_COUNTRY = None
+            # 保持最经典的 13 个顶级精品 ASN 白名单
             TARGET_ASNS = {906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453, 36002, 8143}
             TARGET_PORT = None
+
+            # 【核心修改点】网络圈中文黑话翻译字典
+            NICKNAMES = {
+                "36002": "狗妈",
+                "8143": "奶爸",
+                "906": "大妈",
+                "396982": "御坂",
+                "137929": "御坂",
+                "58453": "御坂",
+                "25820": "搬瓦工",
+                "9929": "联通A网",
+                "63888": "联通海外",
+                "135064": "联通云",
+                "4809": "电信CN2",
+                "40065": "CNSERVERS",
+                "32097": "Virtuozzo"
+            }
 
             API_URL = "https://zip.cm.edu.kg/all.json"
             
@@ -51,7 +69,6 @@ jobs:
             elif isinstance(raw_data, dict):
                 for key, value in raw_data.items():
                     if isinstance(value, list): node_data_list.extend(value)
-                    elif isinstance(value, dict): node_data_list.append(value)
 
             if not node_data_list: return
                 
@@ -62,43 +79,42 @@ jobs:
             for item in node_data_list:
                 if not isinstance(item, dict): continue
                 meta_data = item.get("meta", {})
-                port = item.get("_port") or meta_data.get("_port")
-                if port is None:
-                    port_list = item.get("port")
-                    if isinstance(port_list, list) and len(port_list) > 0: port = port_list[0]
-                        
+                port = item.get("_port") or meta_data.get("_port") or (item.get("port")[0] if isinstance(item.get("port"), list) and item.get("port") else None)
+                if port is None: continue
+
                 country = meta_data.get("country", "Unknown")
                 asn = meta_data.get("asn", "Unknown")
-                
-                raw_org = meta_data.get("org") or meta_data.get("isp") or ""
-                if raw_org: org_name = str(raw_org).split()[0]
-                else: org_name = f"AS{asn}"
-                
-                org_name = "".join(e for e in org_name if e.isalnum())
-                if not org_name: org_name = f"AS{asn}"
+                asn_str = str(asn)
 
-                if port is None: continue
                 if TARGET_COUNTRY and country != TARGET_COUNTRY: continue
                 if TARGET_ASNS and asn not in TARGET_ASNS: continue
                 if TARGET_PORT and int(port) != TARGET_PORT: continue
                 
-                v4_ip = item.get("ip")
-                v6_ip = meta_data.get("clientIp")
-                
-                node_ips = []
-                if v4_ip: node_ips.append(v4_ip)
-                if v6_ip: node_ips.append(v6_ip)
+                # 【核心修改点】优先匹配黑话字典，匹配不到再用原本的英文清洗名
+                if asn_str in NICKNAMES:
+                    org_name = NICKNAMES[asn_str]
+                else:
+                    raw_org = meta_data.get("org") or meta_data.get("isp") or ""
+                    if "gomami" in str(raw_org).lower(): org_name = "狗妈"
+                    elif "neburst" in str(raw_org).lower(): org_name = "奶爸"
+                    elif "oracle" in str(raw_org).lower(): org_name = "大妈"
+                    elif "misaka" in str(raw_org).lower(): org_name = "御坂"
+                    elif raw_org: org_name = "".join(e for e in str(raw_org).split()[0] if e.isalnum())
+                    else: org_name = f"AS{asn}"
+
+                v4_ip, v6_ip = item.get("ip"), meta_data.get("clientIp")
+                node_ips = [ip for ip in [v4_ip, v6_ip] if ip]
                     
                 for current_ip in node_ips:
                     if current_ip in seen_ips: continue
                     seen_ips.add(current_ip)
                     
-                    if ":" in current_ip: formatted_ip = f"[{current_ip}]"
-                    else: formatted_ip = current_ip
+                    formatted_ip = f"[{current_ip}]" if ":" in current_ip else current_ip
                     
                     counter += 1
                     idx_str = f"{counter:02d}"
                     
+                    # 拼接出极具亲切感的格式：IP:端口#CM_狗妈_US_01
                     full_url = f"{formatted_ip}:{port}#CM_{org_name}_{country}_{idx_str}"
                     final_links.append(full_url)
 
@@ -115,12 +131,10 @@ jobs:
         EOF
         python temp_script.py
 
-    # 4. 【核心修改点】使用 allow-empty 允许空提交，并强制推送更新
     - name: Commit and push changes
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add vless_api_all.txt
-        # 即使内容没变，也强制本地提交一次
-        git commit --allow-empty -m "自动定时刷新优选IP列表"
+        git commit --allow-empty -m "自动定时刷新优选IP列表(中文黑话版)"
         git push origin HEAD
