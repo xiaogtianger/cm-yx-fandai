@@ -1,32 +1,26 @@
-name: 自动拉取反代IP(防闪退合并版)
+name: 自动拉取反代IP(强行更新版)
 
 on:
-  # 每天北京时间早上 8:00 自动运行 (UTC 0:00)
   schedule:
     - cron: '0 0 * * *'
-  # 允许在 GitHub 页面上手动触发运行
   workflow_dispatch:
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
     
-    # 解决 Node.js 20 弃用警告
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-    # 1. 检出仓库代码
     - name: Checkout repository code
       uses: actions/checkout@v4.2.2
 
-    # 2. 安装 Python 环境
     - name: Set up Python
       uses: actions/setup-python@v5.4.0
       with:
         python-version: '3.10'
 
-    # 3. 在线动态生成并运行带有国家备注的 Python 脚本
     - name: Create and Run Script
       run: |
         cat << 'EOF' > temp_script.py
@@ -37,13 +31,11 @@ jobs:
 
         def generate_vless_from_api():
             TARGET_COUNTRY = None
-            # 已经为你新增了 36002 (GoMami) 和 8143 (Neburst)
             TARGET_ASNS = {906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453, 36002, 8143}
             TARGET_PORT = None
 
             API_URL = "https://zip.cm.edu.kg/all.json"
             
-            print(f"建立网络连接: 开始抓取目标接口数据 {API_URL}")
             try:
                 request_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
                 req = urllib.request.Request(API_URL, headers=request_headers)
@@ -51,20 +43,17 @@ jobs:
                     json_response = response.read().decode('utf8')
                     raw_data = json.loads(json_response)
             except Exception as e:
-                print(f"致命阻断: 网络通信故障 详情: {e}")
+                print(f"致命阻断: 详情: {e}")
                 return
 
             node_data_list = []
-            if isinstance(raw_data, list):
-                node_data_list = raw_data
+            if isinstance(raw_data, list): node_data_list = raw_data
             elif isinstance(raw_data, dict):
                 for key, value in raw_data.items():
                     if isinstance(value, list): node_data_list.extend(value)
                     elif isinstance(value, dict): node_data_list.append(value)
 
-            if not node_data_list:
-                print("致命阻断: 数据源为空。")
-                return
+            if not node_data_list: return
                 
             seen_ips = set()
             final_links = []
@@ -81,17 +70,12 @@ jobs:
                 country = meta_data.get("country", "Unknown")
                 asn = meta_data.get("asn", "Unknown")
                 
-                # 【防闪退增强】提取品牌/组织名称，做多重降级备用保护
                 raw_org = meta_data.get("org") or meta_data.get("isp") or ""
-                if raw_org:
-                    org_name = str(raw_org).split()[0]
-                else:
-                    org_name = f"AS{asn}"
+                if raw_org: org_name = str(raw_org).split()[0]
+                else: org_name = f"AS{asn}"
                 
-                # 严格清洗名字，确保只留下字母和数字，防止作为节点名时在某些客户端闪退
                 org_name = "".join(e for e in org_name if e.isalnum())
-                if not org_name: 
-                    org_name = f"AS{asn}"
+                if not org_name: org_name = f"AS{asn}"
 
                 if port is None: continue
                 if TARGET_COUNTRY and country != TARGET_COUNTRY: continue
@@ -109,41 +93,34 @@ jobs:
                     if current_ip in seen_ips: continue
                     seen_ips.add(current_ip)
                     
-                    if ":" in current_ip:
-                        formatted_ip = f"[{current_ip}]"
-                    else:
-                        formatted_ip = current_ip
+                    if ":" in current_ip: formatted_ip = f"[{current_ip}]"
+                    else: formatted_ip = current_ip
                     
                     counter += 1
                     idx_str = f"{counter:02d}"
                     
-                    # 拼接带有容错保护的备注信息
                     full_url = f"{formatted_ip}:{port}#CM_{org_name}_{country}_{idx_str}"
                     final_links.append(full_url)
 
             total_links = len(final_links)
-            print(f"多维匹配完成: 精确筛出并去重 {total_links} 个独立优选IP。")
-
             if total_links == 0: return
 
             output_filename = "vless_api_all.txt"
             with open(output_filename, 'w', encoding='utf8') as out_f:
-                for link in final_links: 
-                    out_f.write(link + "\n")
-            print(f"数据固化: 所有数据已成功合并写入 {output_filename}")
+                for link in final_links: out_f.write(link + "\n")
+            print(f"数据固化成功，共筛选出 {total_links} 个独立优选IP。")
 
         if __name__ == "__main__":
             generate_vless_from_api()
         EOF
-        
-        # 运行临时脚本
         python temp_script.py
 
-    # 4. 把合并后的单个 txt 文件自动提交并推送到仓库
+    # 4. 【核心修改点】使用 allow-empty 允许空提交，并强制推送更新
     - name: Commit and push changes
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add vless_api_all.txt
-        git diff --quiet && git diff --staged --quiet || git commit -m "自动更新合并版优选IP列表(防闪退版)"
-        git push
+        # 即使内容没变，也强制本地提交一次
+        git commit --allow-empty -m "自动定时刷新优选IP列表"
+        git push origin HEAD
