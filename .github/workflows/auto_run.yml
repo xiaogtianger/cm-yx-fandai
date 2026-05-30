@@ -1,4 +1,4 @@
-name: 自动拉取反代IP(纯净版)
+name: 自动拉取反代IP(合并版)
 
 on:
   # 每天北京时间早上 8:00 自动运行 (UTC 0:00)
@@ -10,9 +10,13 @@ on:
 jobs:
   run-script:
     runs-on: ubuntu-latest
+    
+    # 解决 Node.js 20 弃用警告
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-    # 1. 检出仓库代码（为了后续能把生成的 txt 推送回来）
+    # 1. 检出仓库代码
     - name: Checkout repository code
       uses: actions/checkout@v4
 
@@ -104,28 +108,7 @@ jobs:
 
             if total_links == 0: return
 
-            chunk_size = 50
-            for i in range(0, total_links, chunk_size):
-                chunk = final_links[i : i + chunk_size]
-                file_index = (i // chunk_size) + 1
-                output_filename = f"vless_api_part{file_index}.txt"
-                with open(output_filename, 'w', encoding='utf8') as out_f:
-                    for link in chunk: out_f.write(link + "\n")
-                print(f"数据固化: {output_filename} 封装完毕")
-
-        if __name__ == "__main__":
-            generate_vless_from_api()
-        EOF
-        
-        # 运行刚刚生成的临时脚本
-        python temp_script.py
-
-    # 4. 把生成的 txt 文件自动提交并推送到仓库
-    - name: Commit and push changes
-      run: |
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-        git config --local user.name "github-actions[bot]"
-        # 仅将生成的 txt 文件加入暂存区，临时 py 文件会被自动忽略
-        git add vless_api_part*.txt
-        git diff --quiet && git diff --staged --quiet || git commit -m "自动更新优选IP列表"
-        git push
+            # 【修改点】不再切片分块，全部数据一次性写入单文件
+            output_filename = "vless_api_all.txt"
+            with open(output_filename, 'w', encoding='utf8') as out_f:
+                for
