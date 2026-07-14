@@ -1,0 +1,193 @@
+import os
+import json
+import csv
+import urllib.request
+import urllib.error
+
+# =====================================================================
+# 1. 经典精品筛选函数 (保持原汁原味，不作任何逻辑修改)
+# =====================================================================
+def generate_vless_from_api():
+    TARGET_COUNTRY = None
+    # 保持最经典的 13 个顶级精品 ASN 白名单
+    TARGET_ASNS = {906, 25820, 32097, 63888, 396982, 137929, 40065, 135064, 4809, 9929, 58453, 36002, 8143}
+    TARGET_PORT = None
+
+    # 【核心修改点】网络圈中文黑话翻译字典
+    NICKNAMES = {
+        "36002": "狗妈",
+        "8143": "奶爸",
+        "906": "大妈",
+        "396982": "Google LLC",
+        "137929": "亚太大妈",
+        "58453": "移动 CMI",
+        "25820": "搬瓦工",
+        "9929": "联通A网",
+        "63888": "Datawing Limited",
+        "135064": "Rio Tinto IS&T",
+        "4809": "电信CN2",
+        "40065": "CNSERVERS",
+        "32097": "WholeSale Internet"
+    }
+
+    API_URL = "https://zip.cm.edu.kg/all.json"
+    
+    try:
+        request_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        req = urllib.request.Request(API_URL, headers=request_headers)
+        with urllib.request.urlopen(req, timeout=20) as response:
+            json_response = response.read().decode('utf8')
+            raw_data = json.loads(json_response)
+    except Exception as e:
+        print(f"致命阻断: 详情: {e}")
+        return
+
+    node_data_list = []
+    if isinstance(raw_data, list): node_data_list = raw_data
+    elif isinstance(raw_data, dict):
+        for key, value in raw_data.items():
+            if isinstance(value, list): node_data_list.extend(value)
+
+    if not node_data_list: return
+        
+    seen_ips = set()
+    final_links = []
+    counter = 0
+
+    for item in node_data_list:
+        if not isinstance(item, dict): continue
+        meta_data = item.get("meta", {})
+        port = item.get("_port") or meta_data.get("_port") or (item.get("port")[0] if isinstance(item.get("port"), list) and item.get("port") else None)
+        if port is None: continue
+
+        country = meta_data.get("country", "Unknown")
+        asn = meta_data.get("asn", "Unknown")
+        asn_str = str(asn)
+
+        if TARGET_COUNTRY and country != TARGET_COUNTRY: continue
+        if TARGET_ASNS and asn not in TARGET_ASNS: continue
+        if TARGET_PORT and int(port) != TARGET_PORT: continue
+        
+        # 【核心修改点】优先匹配黑话字典，匹配不到再用原本的英文清洗名
+        if asn_str in NICKNAMES:
+            org_name = NICKNAMES[asn_str]
+        else:
+            raw_org = meta_data.get("org") or meta_data.get("isp") or ""
+            if "gomami" in str(raw_org).lower(): org_name = "狗妈"
+            elif "neburst" in str(raw_org).lower(): org_name = "奶爸"
+            elif "oracle" in str(raw_org).lower(): org_name = "大妈"
+            elif "misaka" in str(raw_org).lower(): org_name = "御坂"
+            elif raw_org: org_name = "".join(e for e in str(raw_org).split()[0] if e.isalnum())
+            else: org_name = f"AS{asn}"
+
+        v4_ip, v6_ip = item.get("ip"), meta_data.get("clientIp")
+        node_ips = [ip for ip in [v4_ip, v6_ip] if ip]
+            
+        for current_ip in node_ips:
+            if current_ip in seen_ips: continue
+            seen_ips.add(current_ip)
+            
+            formatted_ip = f"[{current_ip}]" if ":" in current_ip else current_ip
+            
+            counter += 1
+            idx_str = f"{counter:02d}"
+            
+            # 拼接出极具亲切感的格式：IP:端口#CM_狗妈_US_01
+            full_url = f"{formatted_ip}:{port}#CM_{org_name}_{country}_{idx_str}"
+            final_links.append(full_url)
+
+    total_links = len(final_links)
+    if total_links == 0: return
+
+    output_filename = "vless_api_all.txt"
+    with open(output_filename, 'w', encoding='utf8') as out_f:
+        for link in final_links: out_f.write(link + "\n")
+    print(f"数据固化成功，共筛选出 {total_links} 个独立优选IP。")
+
+
+# =====================================================================
+# 2. 全量双栈 CSV 独立处理函数 (完全隔离，确保标准 CSV 格式：无BOM、\n 换行)
+# =====================================================================
+def generate_csv_from_api():
+    API_URL = "https://zip.cm.edu.kg/all.json"
+    
+    try:
+        request_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        req = urllib.request.Request(API_URL, headers=request_headers)
+        with urllib.request.urlopen(req, timeout=20) as response:
+            json_response = response.read().decode('utf8')
+            raw_data = json.loads(json_response)
+    except Exception as e:
+        print(f"CSV生成中途中断: 详情: {e}")
+        return
+
+    node_data_list = []
+    if isinstance(raw_data, list): 
+        node_data_list = raw_data
+    elif isinstance(raw_data, dict):
+        for key, value in raw_data.items():
+            if isinstance(value, list): 
+                node_data_list.extend(value)
+
+    if not node_data_list: 
+        print("CSV未解析到任何有效数据。")
+        return
+
+    ipv4_rows = []
+    ipv6_rows = []
+    ipv4_seen = set()
+    ipv6_seen = set()
+
+    for item in node_data_list:
+        if not isinstance(item, dict): 
+            continue
+        meta_data = item.get("meta", {})
+        
+        # 提取端口
+        port = item.get("_port") or meta_data.get("_port") or (item.get("port")[0] if isinstance(item.get("port"), list) and item.get("port") else None)
+        if port is None: 
+            continue
+
+        v4_ip, v6_ip = item.get("ip"), meta_data.get("clientIp")
+
+        # 提取并去重 IPv4
+        if v4_ip and ":" not in str(v4_ip):
+            v4_pair = f"{v4_ip}:{port}"
+            if v4_pair not in ipv4_seen:
+                ipv4_seen.add(v4_pair)
+                ipv4_rows.append({"ip": v4_ip, "port": port})
+
+        # 提取并去重 IPv6
+        for possible_v6 in [v6_ip, v4_ip]:
+            if possible_v6 and ":" in str(possible_v6):
+                v6_pair = f"{possible_v6}:{port}"
+                if v6_pair not in ipv6_seen:
+                    ipv6_seen.add(v6_pair)
+                    ipv6_rows.append({"ip": possible_v6, "port": port})
+
+    csv_headers = ["ip", "port"]
+
+    # 写入 cm中转ipv4.csv (无BOM, 强制 \n 换行，与 DMIT 格式一致)
+    if ipv4_rows:
+        v4_filename = "cm中转ipv4.csv"
+        with open(v4_filename, 'w', encoding='utf-8', newline='\n') as csv_f:
+            writer = csv.DictWriter(csv_f, fieldnames=csv_headers, lineterminator='\n')
+            writer.writeheader()
+            writer.writerows(ipv4_rows)
+        print(f"全量 IPv4 CSV 写入成功，共 {len(ipv4_rows)} 条数据。")
+
+    # 写入 cm中转ipv6.csv (无BOM, 强制 \n 换行，与 DMIT 格式一致)
+    if ipv6_rows:
+        v6_filename = "cm中转ipv6.csv"
+        with open(v6_filename, 'w', encoding='utf-8', newline='\n') as csv_f:
+            writer = csv.DictWriter(csv_f, fieldnames=csv_headers, lineterminator='\n')
+            writer.writeheader()
+            writer.writerows(ipv6_rows)
+        print(f"全量 IPv6 CSV 写入成功，共 {len(ipv6_rows)} 条数据。")
+
+
+if __name__ == "__main__":
+    # 独立执行精品 TXT 筛选
+    generate_vless_from_api()
+    # 独立执行全量 CSV 生成
+    generate_csv_from_api()
