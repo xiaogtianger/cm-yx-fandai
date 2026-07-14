@@ -26,6 +26,7 @@ jobs:
         cat << 'EOF' > temp_script.py
         import os
         import json
+        import csv
         import urllib.request
         import urllib.error
 
@@ -65,48 +66,88 @@ jobs:
                 return
 
             node_data_list = []
-            if isinstance(raw_data, list): node_data_list = raw_data
+            if isinstance(raw_data, list): 
+                node_data_list = raw_data
             elif isinstance(raw_data, dict):
                 for key, value in raw_data.items():
-                    if isinstance(value, list): node_data_list.extend(value)
+                    if isinstance(value, list): 
+                        node_data_list.extend(value)
 
-            if not node_data_list: return
+            if not node_data_list: 
+                print("未解析到任何有效节点数据。")
+                return
                 
             seen_ips = set()
             final_links = []
             counter = 0
 
+            # 准备全量 CSV 数据的容器
+            csv_rows = []
+            csv_seen_pairs = set() # 用于 IP+端口 组合去重
+
             for item in node_data_list:
-                if not isinstance(item, dict): continue
+                if not isinstance(item, dict): 
+                    continue
                 meta_data = item.get("meta", {})
+                
+                # 兼容提取端口
                 port = item.get("_port") or meta_data.get("_port") or (item.get("port")[0] if isinstance(item.get("port"), list) and item.get("port") else None)
-                if port is None: continue
+                if port is None: 
+                    continue
 
                 country = meta_data.get("country", "Unknown")
                 asn = meta_data.get("asn", "Unknown")
                 asn_str = str(asn)
+                raw_org = meta_data.get("org") or meta_data.get("isp") or ""
 
-                if TARGET_COUNTRY and country != TARGET_COUNTRY: continue
-                if TARGET_ASNS and asn not in TARGET_ASNS: continue
-                if TARGET_PORT and int(port) != TARGET_PORT: continue
+                # ==================== 1. 全量写入 CSV 逻辑 (仅限 ip 和 port) ====================
+                v4_ip, v6_ip = item.get("ip"), meta_data.get("clientIp")
                 
-                # 【核心修改点】优先匹配黑话字典，匹配不到再用原本的英文清洗名
+                for ip_addr in [v4_ip, v6_ip]:
+                    if not ip_addr:
+                        continue
+                    
+                    # 用 "IP:端口" 作为唯一键去重
+                    ip_port_pair = f"{ip_addr}:{port}"
+                    if ip_port_pair in csv_seen_pairs:
+                        continue
+                    csv_seen_pairs.add(ip_port_pair)
+
+                    csv_rows.append({
+                        "ip": ip_addr,
+                        "port": port
+                    })
+
+                # ==================== 2. 原有精品 ASN 筛选及黑话重命名逻辑 ====================
+                if TARGET_COUNTRY and country != TARGET_COUNTRY: 
+                    continue
+                if TARGET_ASNS and asn not in TARGET_ASNS: 
+                    continue
+                if TARGET_PORT and int(port) != TARGET_PORT: 
+                    continue
+                
+                # 优先匹配黑话字典，匹配不到再用原本的英文清洗名
                 if asn_str in NICKNAMES:
                     org_name = NICKNAMES[asn_str]
                 else:
-                    raw_org = meta_data.get("org") or meta_data.get("isp") or ""
-                    if "gomami" in str(raw_org).lower(): org_name = "狗妈"
-                    elif "neburst" in str(raw_org).lower(): org_name = "奶爸"
-                    elif "oracle" in str(raw_org).lower(): org_name = "大妈"
-                    elif "misaka" in str(raw_org).lower(): org_name = "御坂"
-                    elif raw_org: org_name = "".join(e for e in str(raw_org).split()[0] if e.isalnum())
-                    else: org_name = f"AS{asn}"
+                    if "gomami" in str(raw_org).lower(): 
+                        org_name = "狗妈"
+                    elif "neburst" in str(raw_org).lower(): 
+                        org_name = "奶爸"
+                    elif "oracle" in str(raw_org).lower(): 
+                        org_name = "大妈"
+                    elif "misaka" in str(raw_org).lower(): 
+                        org_name = "御坂"
+                    elif raw_org: 
+                        org_name = "".join(e for e in str(raw_org).split()[0] if e.isalnum())
+                    else: 
+                        org_name = f"AS{asn}"
 
-                v4_ip, v6_ip = item.get("ip"), meta_data.get("clientIp")
                 node_ips = [ip for ip in [v4_ip, v6_ip] if ip]
                     
                 for current_ip in node_ips:
-                    if current_ip in seen_ips: continue
+                    if current_ip in seen_ips: 
+                        continue
                     seen_ips.add(current_ip)
                     
                     formatted_ip = f"[{current_ip}]" if ":" in current_ip else current_ip
@@ -118,13 +159,27 @@ jobs:
                     full_url = f"{formatted_ip}:{port}#CM_{org_name}_{country}_{idx_str}"
                     final_links.append(full_url)
 
+            # ==================== 3. 数据写入与固化 ====================
+            # 写入原本的精品筛选 TXT 文件
             total_links = len(final_links)
-            if total_links == 0: return
+            if total_links > 0:
+                output_filename = "vless_api_all.txt"
+                with open(output_filename, 'w', encoding='utf8') as out_f:
+                    for link in final_links: 
+                        out_f.write(link + "\n")
+                print(f"精品TXT数据固化成功，共筛选出 {total_links} 个独立优选IP。")
+            else:
+                print("未筛选出符合精品ASN条件的IP。")
 
-            output_filename = "vless_api_all.txt"
-            with open(output_filename, 'w', encoding='utf8') as out_f:
-                for link in final_links: out_f.write(link + "\n")
-            print(f"数据固化成功，共筛选出 {total_links} 个独立优选IP。")
+            # 写入双列 CSV 文件 (仅包含 ip 和 port)
+            if csv_rows:
+                csv_filename = "cm中转ip.csv"
+                csv_headers = ["ip", "port"]
+                with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as csv_f:
+                    writer = csv.DictWriter(csv_f, fieldnames=csv_headers)
+                    writer.writeheader()
+                    writer.writerows(csv_rows)
+                print(f"全量双列CSV数据固化成功，共导出 {len(csv_rows)} 条记录至 '{csv_filename}'。")
 
         if __name__ == "__main__":
             generate_vless_from_api()
@@ -135,6 +190,6 @@ jobs:
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
-        git add vless_api_all.txt
-        git commit --allow-empty -m "自动定时刷新优选IP列表(中文黑话版)"
+        git add vless_api_all.txt cm中转ip.csv
+        git commit --allow-empty -m "自动定时刷新优选IP列表及极简版全量CSV"
         git push origin HEAD
