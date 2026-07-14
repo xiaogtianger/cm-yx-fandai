@@ -81,9 +81,11 @@ jobs:
             final_links = []
             counter = 0
 
-            # 准备全量 CSV 数据的容器
-            csv_rows = []
-            csv_seen_pairs = set() # 用于 IP+端口 组合去重
+            # 准备全量 IPv4/IPv6 CSV 数据的容器和去重集合
+            ipv4_rows = []
+            ipv6_rows = []
+            ipv4_seen = set()
+            ipv6_seen = set()
 
             for item in node_data_list:
                 if not isinstance(item, dict): 
@@ -100,23 +102,23 @@ jobs:
                 asn_str = str(asn)
                 raw_org = meta_data.get("org") or meta_data.get("isp") or ""
 
-                # ==================== 1. 全量写入 CSV 逻辑 (仅限 ip 和 port) ====================
+                # ==================== 1. 全量 CSV 提取逻辑 ====================
                 v4_ip, v6_ip = item.get("ip"), meta_data.get("clientIp")
                 
-                for ip_addr in [v4_ip, v6_ip]:
-                    if not ip_addr:
-                        continue
-                    
-                    # 用 "IP:端口" 作为唯一键去重
-                    ip_port_pair = f"{ip_addr}:{port}"
-                    if ip_port_pair in csv_seen_pairs:
-                        continue
-                    csv_seen_pairs.add(ip_port_pair)
-
-                    csv_rows.append({
-                        "ip": ip_addr,
-                        "port": port
-                    })
+                # 处理 IPv4
+                if v4_ip and ":" not in str(v4_ip):
+                    v4_pair = f"{v4_ip}:{port}"
+                    if v4_pair not in ipv4_seen:
+                        ipv4_seen.add(v4_pair)
+                        ipv4_rows.append({"ip": v4_ip, "port": port})
+                
+                # 处理 IPv6 (包含 clientIp，或兼容 ip 字段里含有冒号的情况)
+                for possible_v6 in [v6_ip, v4_ip]:
+                    if possible_v6 and ":" in str(possible_v6):
+                        v6_pair = f"{possible_v6}:{port}"
+                        if v6_pair not in ipv6_seen:
+                            ipv6_seen.add(v6_pair)
+                            ipv6_rows.append({"ip": possible_v6, "port": port})
 
                 # ==================== 2. 原有精品 ASN 筛选及黑话重命名逻辑 ====================
                 if TARGET_COUNTRY and country != TARGET_COUNTRY: 
@@ -171,15 +173,24 @@ jobs:
             else:
                 print("未筛选出符合精品ASN条件的IP。")
 
-            # 写入双列 CSV 文件 (仅包含 ip 和 port)
-            if csv_rows:
-                csv_filename = "cm中转ip.csv"
-                csv_headers = ["ip", "port"]
-                with open(csv_filename, 'w', encoding='utf-8-sig', newline='') as csv_f:
+            # 写入 IPv4 CSV 文件
+            csv_headers = ["ip", "port"]
+            if ipv4_rows:
+                v4_filename = "cm中转ipv4.csv"
+                with open(v4_filename, 'w', encoding='utf-8-sig', newline='') as csv_f:
                     writer = csv.DictWriter(csv_f, fieldnames=csv_headers)
                     writer.writeheader()
-                    writer.writerows(csv_rows)
-                print(f"全量双列CSV数据固化成功，共导出 {len(csv_rows)} 条记录至 '{csv_filename}'。")
+                    writer.writerows(ipv4_rows)
+                print(f"IPv4 CSV数据固化成功，共导出 {len(ipv4_rows)} 条记录至 '{v4_filename}'。")
+
+            # 写入 IPv6 CSV 文件
+            if ipv6_rows:
+                v6_filename = "cm中转ipv6.csv"
+                with open(v6_filename, 'w', encoding='utf-8-sig', newline='') as csv_f:
+                    writer = csv.DictWriter(csv_f, fieldnames=csv_headers)
+                    writer.writeheader()
+                    writer.writerows(ipv6_rows)
+                print(f"IPv6 CSV数据固化成功，共导出 {len(ipv6_rows)} 条记录至 '{v6_filename}'。")
 
         if __name__ == "__main__":
             generate_vless_from_api()
@@ -190,6 +201,6 @@ jobs:
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
-        git add vless_api_all.txt cm中转ip.csv
-        git commit --allow-empty -m "自动定时刷新优选IP列表及极简版全量CSV"
+        git add vless_api_all.txt cm中转ipv4.csv cm中转ipv6.csv
+        git commit --allow-empty -m "自动定时刷新优选IP列表及分流双栈全量CSV"
         git push origin HEAD
