@@ -112,7 +112,7 @@ jobs:
                         ipv4_seen.add(v4_pair)
                         ipv4_rows.append({"ip": v4_ip, "port": port})
                 
-                # 处理 IPv6 (包含 clientIp，或兼容 ip 字段里含有冒号的情况)
+                # 处理 IPv6
                 for possible_v6 in [v6_ip, v4_ip]:
                     if possible_v6 and ":" in str(possible_v6):
                         v6_pair = f"{possible_v6}:{port}"
@@ -173,21 +173,22 @@ jobs:
             else:
                 print("未筛选出符合精品ASN条件的IP。")
 
-            # 写入 IPv4 CSV 文件
             csv_headers = ["ip", "port"]
+
+            # 写入 IPv4 CSV 文件（无BOM，纯 \n 换行）
             if ipv4_rows:
                 v4_filename = "cm中转ipv4.csv"
-                with open(v4_filename, 'w', encoding='utf-8-sig', newline='') as csv_f:
-                    writer = csv.DictWriter(csv_f, fieldnames=csv_headers)
+                with open(v4_filename, 'w', encoding='utf-8', newline='\n') as csv_f:
+                    writer = csv.DictWriter(csv_f, fieldnames=csv_headers, lineterminator='\n')
                     writer.writeheader()
                     writer.writerows(ipv4_rows)
                 print(f"IPv4 CSV数据固化成功，共导出 {len(ipv4_rows)} 条记录至 '{v4_filename}'。")
 
-            # 写入 IPv6 CSV 文件
+            # 写入 IPv6 CSV 文件（无BOM，纯 \n 换行）
             if ipv6_rows:
                 v6_filename = "cm中转ipv6.csv"
-                with open(v6_filename, 'w', encoding='utf-8-sig', newline='') as csv_f:
-                    writer = csv.DictWriter(csv_f, fieldnames=csv_headers)
+                with open(v6_filename, 'w', encoding='utf-8', newline='\n') as csv_f:
+                    writer = csv.DictWriter(csv_f, fieldnames=csv_headers, lineterminator='\n')
                     writer.writeheader()
                     writer.writerows(ipv6_rows)
                 print(f"IPv6 CSV数据固化成功，共导出 {len(ipv6_rows)} 条记录至 '{v6_filename}'。")
@@ -202,5 +203,5 @@ jobs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add vless_api_all.txt cm中转ipv4.csv cm中转ipv6.csv
-        git commit --allow-empty -m "自动定时刷新优选IP列表及分流双栈全量CSV"
+        git commit --allow-empty -m "自动定时刷新优选IP列表及标准格式CSV文件"
         git push origin HEAD
