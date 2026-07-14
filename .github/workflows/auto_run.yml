@@ -224,16 +224,11 @@ jobs:
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
-        
-        # 1. 关闭 Git 对中文文件名的转义，防止中文名丢失
         git config --global core.quotepath false
         
-        # 2. 强力暂存当前目录下所有新生成、修改的文件（彻底避免中文匹配失败）
-        git add .
+        # 不要用 git add . ，改为明确添加需要的文件
+        git add vless_api_all.txt cm中转ipv4.csv cm中转ipv6.csv || true
         
-        # 3. 打印当前 Git 状态（能让我们在 Actions 日志里直接肉眼看到哪些文件被成功抓到了）
         git status
-        
-        # 4. 提交并推送
         git commit --allow-empty -m "自动定时刷新优选IP列表及全量标准CSV"
         git push origin HEAD
